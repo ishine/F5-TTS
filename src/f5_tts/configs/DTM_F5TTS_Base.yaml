@@ -1,0 +1,77 @@
+hydra:
+  run:
+    dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+datasets:
+  name: Emilia_ZH_EN  # dataset name
+  batch_size_per_gpu: 38400  # 8 GPUs, 8 * 38400 = 307200
+  batch_size_type: frame  # frame | sample
+  max_samples: 64  # max sequences per batch if use frame-wise batch_size. we set 32 for small models, 64 for base models
+  num_workers: 16
+
+optim:
+  epochs: 5  # fewer epochs needed for DTM head training
+  learning_rate: 1e-4  # learning rate for head training
+  num_warmup_updates: 5000  # warmup updates
+  grad_accumulation_steps: 1  # note: updates = steps / grad_accumulation_steps
+  max_grad_norm: 1.0  # gradient clipping
+  bnb_optimizer: False  # use bnb 8bit AdamW optimizer or not
+
+model:
+  name: DTM_F5TTS_Base  # model name
+  tokenizer: pinyin  # tokenizer type
+  tokenizer_path: null  # if 'custom' tokenizer, define the path want to use (should be vocab.txt)
+  backbone: DiT
+  
+  # Backbone architecture (frozen, pretrained)
+  backbone_arch:
+    dim: 1024
+    depth: 22
+    heads: 16
+    ff_mult: 2
+    text_dim: 512
+    text_mask_padding: False
+    conv_layers: 4
+    pe_attn_head: 1
+    attn_backend: torch  # torch | flash_attn
+    attn_mask_enabled: False
+    checkpoint_activations: False
+  
+  # DTM Head architecture (trainable)
+  head_arch:
+    backbone_dim: 1024  # match backbone dim
+    mel_dim: 100  # match n_mel_channels
+    hidden_dim: 512  # head hidden dimension
+    num_layers: 6  # number of MLP blocks
+    ff_mult: 4  # FFN expansion (512 -> 2048 -> 512)
+    dropout: 0.1
+  
+  # DTM-specific parameters
+  dtm:
+    global_timesteps: 8  # T: number of global timesteps (4-8 recommended)
+    ode_solver_steps: 1  # number of substeps for microscopic ODE (1 for single-step Euler)
+    ode_solver_method: euler  # euler | midpoint
+  
+  mel_spec:
+    target_sample_rate: 24000
+    n_mel_channels: 100
+    hop_length: 256
+    win_length: 1024
+    n_fft: 1024
+    mel_spec_type: vocos  # vocos | bigvgan
+  
+  vocoder:
+    is_local: False  # use local offline ckpt or not
+    local_path: null  # local vocoder path
+
+ckpts:
+  # Pretrained backbone checkpoint path (REQUIRED)
+  backbone_checkpoint_path: ckpts/F5TTS_Base/model_last.pt  # path to pretrained F5-TTS checkpoint
+  
+  logger: wandb  # wandb | tensorboard | null
+  log_samples: True  # infer random sample per save checkpoint
+  save_per_updates: 10000  # save checkpoint per updates
+  keep_last_n_checkpoints: 5  # keep last N checkpoints
+  last_per_updates: 1000  # save last checkpoint per updates
+  save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}
+
