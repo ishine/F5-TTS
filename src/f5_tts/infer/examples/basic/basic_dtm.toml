@@ -23,8 +23,7 @@ output_dir = "tests"
 
 # 推理参数（DTM 不支持 sway_sampling_coef）
 nfe_step = 8  # 会被 dtm_steps 覆盖
-cfg_strength = 2.0  # 分类器自由引导强度
-speed = 1.0  # 生成速度
+cfg_strength = 1.0  # 分类器自由引导强度
 
 # 音频处理
 target_rms = 0.1  # 目标响度

@@ -19,7 +19,7 @@ from f5_tts.model.utils import get_tokenizer
 
 os.chdir(str(files("f5_tts").joinpath("../..")))  # change working directory to root of project
 
-# TODO:这里是不是只加了DiT Backbone的？理想状况下应该除了那个DTM Head都要加
+
 def load_backbone_from_checkpoint(
     checkpoint_path: str,
     model_cls,
@@ -35,16 +35,13 @@ def load_backbone_from_checkpoint(
         checkpoint_path: Path to checkpoint file
         model_cls: Model class (e.g., DiT)
         model_arch: Model architecture config
-        text_num_embeds: Number of text embeddings
+        text_num_embeds: Number of text embeddings (will be inferred from checkpoint if available)
         mel_dim: Mel dimension
         device: Device to load to
     
     Returns:
-        Loaded backbone model
+        tuple: (backbone model, actual vocab size used)
     """
-    # Create backbone model
-    backbone = model_cls(**model_arch, text_num_embeds=text_num_embeds, mel_dim=mel_dim)
-    
     # Load checkpoint
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(
@@ -54,10 +51,8 @@ def load_backbone_from_checkpoint(
     
     print(f"Loading pretrained backbone from {checkpoint_path}")
     
-<<<<<<< HEAD
+    # First, load checkpoint to infer vocab size
     # Check checkpoint format and load accordingly
-=======
->>>>>>> 9186880 (prepare data)
     ckpt_type = checkpoint_path.split(".")[-1].lower()
     if ckpt_type == "safetensors":
         try:
@@ -75,10 +70,9 @@ def load_backbone_from_checkpoint(
             state_dict = checkpoint["model_state_dict"]
         elif "ema_model_state_dict" in checkpoint:
             state_dict = checkpoint["ema_model_state_dict"]
-            # Remove ema_model prefix if present
-            state_dict = {k.replace("ema_model.", ""): v for k, v in state_dict.items()}
         else:
             # Direct state dict (most common for safetensors)
+            # Check if keys have ema_model prefix
             state_dict = checkpoint
     elif ckpt_type == "pt":
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
@@ -89,8 +83,6 @@ def load_backbone_from_checkpoint(
         elif "ema_model_state_dict" in checkpoint:
             # Use EMA model if available
             state_dict = checkpoint["ema_model_state_dict"]
-            # Remove ema_model prefix if present
-            state_dict = {k.replace("ema_model.", ""): v for k, v in state_dict.items()}
         else:
             # Assume checkpoint is the state dict itself
             state_dict = checkpoint
@@ -100,13 +92,21 @@ def load_backbone_from_checkpoint(
             f"Supported formats: .pt, .safetensors"
         )
     
-    # Remove wrapped model prefix if present (e.g., "transformer.")
+    # Remove ema_model prefix if present (e.g., "ema_model.transformer.xxx" -> "transformer.xxx")
+    if any(k.startswith("ema_model.") for k in state_dict.keys()):
+        state_dict = {k.replace("ema_model.", ""): v for k, v in state_dict.items()}
+    
+    # Remove wrapped model prefix if present (e.g., "transformer.xxx" -> "xxx")
     # DTM expects the backbone without CFM wrapper
     if any(k.startswith("transformer.") for k in state_dict.keys()):
         state_dict = {k.replace("transformer.", ""): v for k, v in state_dict.items()}
     
-    # Filter out mel_spec related keys (not part of backbone)
-    state_dict = {k: v for k, v in state_dict.items() if not k.startswith("mel_spec.")}
+    # Filter out non-model keys (mel_spec, EMA metadata, etc.)
+    state_dict = {
+        k: v for k, v in state_dict.items() 
+        if not k.startswith("mel_spec.") and k not in ["initted", "step"]
+    }
+
     
     # Load state dict
     missing_keys, unexpected_keys = backbone.load_state_dict(state_dict, strict=False)
@@ -146,7 +146,7 @@ def main(model_cfg):
     # Load pretrained frozen backbone
     backbone_checkpoint_path = model_cfg.ckpts.backbone_checkpoint_path
     backbone = load_backbone_from_checkpoint(
-        checkpoint_path=str(files("f5_tts").joinpath(f"../../{backbone_checkpoint_path}")),
+        checkpoint_path=backbone_checkpoint_path,
         model_cls=model_cls,
         model_arch=backbone_arch,
         text_num_embeds=vocab_size,

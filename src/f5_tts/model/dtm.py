@@ -171,6 +171,7 @@ class DTM(nn.Module):
         text: torch.Tensor | list[str],  # [batch, text_len]
         *,
         lens: torch.Tensor | None = None,  # [batch]
+        noise_scheduler = None # unused
     ):
         """
         Training forward pass (Algorithm 3).
