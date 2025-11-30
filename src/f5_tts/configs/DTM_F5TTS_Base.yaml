@@ -33,7 +33,7 @@ model:
     text_mask_padding: False
     conv_layers: 4
     pe_attn_head: 1
-    attn_backend: flash_attn  # torch | flash_attn
+    attn_backend: torch  # torch | flash_attn
     attn_mask_enabled: False
     checkpoint_activations: False
   

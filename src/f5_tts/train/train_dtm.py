@@ -19,6 +19,11 @@ from f5_tts.model.utils import get_tokenizer
 
 os.chdir(str(files("f5_tts").joinpath("../..")))  # change working directory to root of project
 
+# 筛掉无法分词的数据
+def is_text_valid(text, vocab_set):
+    if vocab_set is None: 
+        return True
+    return set(text).issubset(vocab_set)
 
 def load_backbone_from_checkpoint(
     checkpoint_path: str,
@@ -107,7 +112,7 @@ def load_backbone_from_checkpoint(
         if not k.startswith("mel_spec.") and k not in ["initted", "step"]
     }
 
-    
+    backbone = model_cls(**model_arch, text_num_embeds=text_num_embeds, mel_dim=mel_dim)
     # Load state dict
     missing_keys, unexpected_keys = backbone.load_state_dict(state_dict, strict=False)
     
