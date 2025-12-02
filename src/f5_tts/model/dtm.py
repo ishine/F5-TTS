@@ -223,7 +223,7 @@ class DTM(nn.Module):
         
         # Sample discrete timestep t uniformly from {1, ..., T-1}
         # We use continuous time in [0, 1] for compatibility with backbone
-        t = torch.randint(1, self.T, (batch_size,), device=device, dtype=torch.long)
+        t = torch.randint(0, self.T, (batch_size,), device=device, dtype=torch.long)
         t_continuous = t.float() / self.T  # Normalize to [0, 1]
         
         # Compute X_t = (1 - t/T) * X_0 + (t/T) * X_T
@@ -293,6 +293,7 @@ class DTM(nn.Module):
         cfg_strength: float = 1.0,  # classifier-free guidance strength
         seed: int | None = None,
         max_duration: int = 4096,
+        sway_sampling_coef = None, # useless
         vocoder: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ):
         """

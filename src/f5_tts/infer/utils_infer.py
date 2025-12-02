@@ -568,25 +568,14 @@ def infer_batch_process(
         # inference
         with torch.inference_mode():
             # Check if model is DTM or CFM
-            if isinstance(model_obj, DTM):
-                # DTM inference (fast, 4-8 steps)
-                generated, _ = model_obj.sample(
-                    cond=audio,
-                    text=final_text_list,
-                    duration=duration,
-                    steps=nfe_step,  # For DTM, this will be 4-8
-                    cfg_strength=cfg_strength,
-                )
-            else:
-                # CFM inference (standard, 32 steps)
-                generated, _ = model_obj.sample(
-                    cond=audio,
-                    text=final_text_list,
-                    duration=duration,
-                    steps=nfe_step,
-                    cfg_strength=cfg_strength,
-                    sway_sampling_coef=sway_sampling_coef,
-                )
+            generated, _ = model_obj.sample(
+                cond=audio,
+                text=final_text_list,
+                duration=duration,
+                steps=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_sampling_coef=sway_sampling_coef,
+            )
             del _
 
             generated = generated.to(torch.float32)  # generated mel spectrogram

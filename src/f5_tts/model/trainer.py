@@ -44,7 +44,7 @@ class Trainer:
         wandb_project="test_f5-tts",
         wandb_run_name="test_run",
         wandb_resume_id: str = None,
-        log_samples: bool = False,
+        log_samples: bool = True,
         last_per_updates=None,
         accelerate_kwargs: dict = dict(),
         ema_kwargs: dict = dict(),
