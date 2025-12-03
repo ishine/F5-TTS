@@ -469,6 +469,8 @@ class DTM(nn.Module):
                     return v_cond + (v_cond - v_uncond) * cfg_strength
                 
                 s_span = torch.linspace(0, 1, self.ode_solver_steps + 1, device=device, dtype=cond.dtype)
+                sway_sampling_coef = 0.0
+                s_span = s_span + sway_sampling_coef * (torch.cos(torch.pi / 2 * s_span) - 1 + s_span)
                 Y_trajectory = odeint(
                     ode_fn_cfg,
                     Y_0,
@@ -494,3 +496,137 @@ class DTM(nn.Module):
         
         return out, trajectory
 
+    @torch.no_grad()
+    def dumm_sample(
+        self,
+        cond: torch.Tensor,
+        text: torch.Tensor | list[str],
+        duration: int | torch.Tensor,
+        *,
+        lens: torch.Tensor | None = None,
+        steps: int | None = None,
+        cfg_strength: float = 1.0,
+        seed: int | None = None,
+        max_duration: int = 4096,
+        vocoder: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        sway_sampling_coef = None
+    ):
+        """
+        Debug function: Sample using DiT's original projection head instead of DTM Head.
+        This validates if the backbone features and DTM sampling logic are correct.
+        """
+        print("\n[DEBUG] Running dummy_sample with frozen DiT projection...")
+        self.eval()
+        
+        # Handle raw wave conditioning
+        if cond.ndim == 2:
+            cond = self.mel_spec(cond)
+            cond = cond.permute(0, 2, 1)
+            assert cond.shape[-1] == self.num_channels
+        
+        cond = cond.to(next(self.parameters()).dtype)
+        
+        batch_size, cond_seq_len, device = *cond.shape[:2], cond.device
+        
+        if not exists(lens):
+            lens = torch.full((batch_size,), cond_seq_len, device=device, dtype=torch.long)
+        
+        # Handle text
+        if isinstance(text, list):
+            if exists(self.vocab_char_map):
+                text = list_str_to_idx(text, self.vocab_char_map).to(device)
+            else:
+                text = list_str_to_tensor(text).to(device)
+            assert text.shape[0] == batch_size
+        
+        # Handle duration
+        cond_mask = lens_to_mask(lens)
+        
+        if isinstance(duration, int):
+            duration = torch.full((batch_size,), duration, device=device, dtype=torch.long)
+        
+        duration = torch.maximum(
+            torch.maximum((text != -1).sum(dim=-1), lens) + 1, duration
+        )
+        duration = duration.clamp(max=max_duration)
+        max_duration = duration.amax()
+        
+        # Pad conditioning
+        cond = F.pad(cond, (0, 0, 0, max_duration - cond_seq_len), value=0.0)
+        cond_mask = F.pad(cond_mask, (0, max_duration - cond_mask.shape[-1]), value=False)
+        cond_mask = cond_mask.unsqueeze(-1)
+        step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
+        
+        if batch_size > 1:
+            mask = lens_to_mask(duration)
+        else:
+            mask = None
+        
+        # Use specified steps or default global_timesteps
+        T = steps if steps is not None else self.T
+        
+        # Initialize X_0 with Gaussian noise
+        X = []
+        for dur in duration:
+            if exists(seed): torch.manual_seed(seed)
+            X.append(torch.randn(dur, self.num_channels, device=device, dtype=cond.dtype))
+        X_0 = pad_sequence(X, padding_value=0, batch_first=True)
+        
+        # 定义 ODE 函数 (Backbone Forward)
+        def ode_fn(t, x):
+            # t 是标量，广播到 batch
+            t_batch = torch.full((batch_size,), t.item(), device=device, dtype=x.dtype)
+            
+            # 使用 cfg_infer=True 进行高效推理
+            if cfg_strength < 1e-5:
+                # Unconditional / Single forward
+                v_pred = self.backbone(
+                    x=x,
+                    cond=step_cond,
+                    text=text,
+                    time=t_batch,
+                    mask=mask,
+                    drop_audio_cond=False,
+                    drop_text=False
+                )
+                return v_pred
+            else:
+                # CFG Forward (DiT 内部同时跑 cond 和 uncond)
+                # 注意：这要求 Backbone 支持 cfg_infer 参数，且内部逻辑是 cat([x, x])
+                v_out = self.backbone(
+                    x=x,
+                    cond=step_cond,
+                    text=text,
+                    time=t_batch,
+                    mask=mask,
+                    cfg_infer=True # 这一步很关键，复用了原版的高效推理逻辑
+                )
+                v_cond, v_uncond = torch.chunk(v_out, 2, dim=0)
+                
+                # 使用你提供的公式 (F5-TTS 风格)
+                # v_final = v_cond + (v_cond - v_uncond) * cfg
+                return v_cond + (v_cond - v_uncond) * cfg_strength
+
+        # 定义时间步
+        t_span = torch.linspace(0, 1, T + 1, device=device, dtype=cond.dtype)
+        
+        # 如果你想加上 Sway Sampling (可选)
+        sway_sampling_coef = -1.0
+        t_span = t_span + sway_sampling_coef * (torch.cos(torch.pi / 2 * t_span) - 1 + t_span)
+
+        # --- 3. 执行 ODE 求解 ---
+        # method='midpoint' 或 'euler'，midpoint 精度更高推荐用于 Debug
+        trajectory = odeint(ode_fn, X_0, t_span, method='euler')
+        
+        # 取最后一步作为结果
+        out = trajectory[-1]
+        
+        # 强制回填 Ref Audio (In-filling 修正)
+        out = torch.where(cond_mask, cond, out)
+        
+        # --- 4. Vocoder 解码 ---
+        if exists(vocoder):
+            out = out.permute(0, 2, 1)
+            out = vocoder(out)
+            
+        return out, trajectory
