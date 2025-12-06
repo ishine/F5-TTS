@@ -1,0 +1,27 @@
+# DTM 推理配置示例
+# DTM 可以将推理步骤从 32 步减少到 4-8 步，提供 4-8 倍加速
+
+# 基本模型配置
+model = "F5TTS_v1_Base"  # 或 "F5TTS_Base"
+# model_cfg = "path/to/your/model_config.yaml"  # 可选：自定义模型配置
+
+# DTM 特定配置
+use_dtm = true  # 启用 DTM 快速推理
+dtm_checkpoint = "ckpts/DTM_F5TTS_Base/model_last.pt"  # DTM 检查点路径
+dtm_steps = 8  # 推理步数：4-8 推荐（越少越快，8 步质量最好）
+
+# 参考音频和文本
+ref_audio = "infer/examples/basic/basic_ref_zh.wav"
+ref_text = "对，这就是我，万人敬仰的太乙真人。"
+
+# 要生成的文本
+gen_text = "今天天气真不错，适合出去散步。使用 DTM 模型可以大幅加速语音合成速度。"
+
+# 输出配置
+output_dir = "tests"
+# output_file = "output_dtm.wav"  # 默认会自动生成带时间戳的文件名
+
+# 推理参数（DTM 不支持 sway_sampling_coef）
+nfe_step = 32  # 会被 dtm_steps 覆盖
+cfg_strength = 1.0  # 分类器自由引导强度
+

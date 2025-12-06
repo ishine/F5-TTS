@@ -1,0 +1,82 @@
+hydra:
+  run:
+    dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+datasets:
+  name: WenetSpeech4TTS_Premium  # dataset name
+  batch_size_per_gpu: 64000  # 8 GPUs, 8 * 38400 = 307200
+  batch_size_type: frame  # frame | sample
+  max_samples: 64  # max sequences per batch if use frame-wise batch_size. we set 32 for small models, 64 for base models
+  num_workers: 4
+
+optim:
+  epochs: 25  # fewer epochs needed for DTM head training
+  learning_rate: 5e-5  # learning rate for head training
+  num_warmup_updates: 2000  # warmup updates
+  grad_accumulation_steps: 2  # note: updates = steps / grad_accumulation_steps，8是为了实现和原版一样的批量
+  max_grad_norm: 1.0  # gradient clipping
+  bnb_optimizer: False  # use bnb 8bit AdamW optimizer or not
+
+model:
+  name: DTM_F5TTS_Base  # model name
+  tokenizer: pinyin  # tokenizer type
+  tokenizer_path: null  # if 'custom' tokenizer, define the path want to use (should be vocab.txt)
+  backbone: DiT
+  
+  # Backbone architecture (frozen, pretrained)
+  backbone_arch:
+    dim: 1024
+    depth: 22
+    heads: 16
+    ff_mult: 2
+    text_dim: 512
+    text_mask_padding: False
+    conv_layers: 4
+    pe_attn_head: 1
+    attn_backend: torch  # torch | flash_attn
+    attn_mask_enabled: False
+    checkpoint_activations: False
+  
+  # DTM Head architecture (trainable)
+  head_arch:
+    backbone_dim: 1024  # match backbone dim
+    mel_dim: 100  # match n_mel_channels
+    hidden_dim: 512  # head hidden dimension
+    num_layers: 6  # number of MLP blocks
+    ff_mult: 4  # FFN expansion (512 -> 2048 -> 512)
+    dropout: 0.1
+  
+  # DTM-specific parameters
+  dtm:
+    global_timesteps: 8  # T: number of global timesteps (4-8 recommended)
+    ode_solver_steps: 64  # number of substeps for microscopic ODE (1 for single-step Euler)
+    ode_solver_method: euler  # euler | midpoint
+    # Classifier-free guidance (CFG) parameters
+    audio_drop_prob: 0.3  # probability to drop audio conditioning (like CFM)
+    cond_drop_prob: 0.2  # probability to drop all conditioning (like CFM)
+    # Conditional training parameters
+    frac_lengths_mask: [0.7, 1.0]  # fraction of sequence to mask for infilling training (like CFM)
+  
+  mel_spec:
+    target_sample_rate: 24000
+    n_mel_channels: 100
+    hop_length: 256
+    win_length: 1024
+    n_fft: 1024
+    mel_spec_type: vocos  # vocos | bigvgan
+  
+  vocoder:
+    is_local: False  # use local offline ckpt or not
+    local_path: null  # local vocoder path
+
+ckpts:
+  # Pretrained backbone checkpoint path (REQUIRED)
+  backbone_checkpoint_path: /inspire/hdd/project/video-generation/chenxie-25019/hyr/F5-TTS/ckpts/F5TTS_v1_Base/model_1250000.safetensors  # path to pretrained F5-TTS checkpoint
+  
+  logger: tensorboard  # wandb | tensorboard | null
+  log_samples: True  # infer random sample per save checkpoint
+  save_per_updates: 10000  # save checkpoint per updates
+  keep_last_n_checkpoints: 5  # keep last N checkpoints
+  last_per_updates: 1000  # save last checkpoint per updates
+  save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}
+
