@@ -1,3 +1,4 @@
+# 兼容emlia的vocab
 # generate audio text map for WenetSpeech4TTS
 # evaluate for vocab size
 
@@ -18,7 +19,8 @@ from tqdm import tqdm
 from f5_tts.model.utils import convert_char_to_pinyin
 
 
-def deal_with_sub_path_files(dataset_path, sub_path):
+# 修改 1: 增加 vocab_set 参数
+def deal_with_sub_path_files(dataset_path, sub_path, vocab_set=None):
     print(f"Dealing with: {sub_path}")
 
     text_dir = os.path.join(dataset_path, sub_path, "txts")
@@ -33,13 +35,28 @@ def deal_with_sub_path_files(dataset_path, sub_path):
         audio_path = os.path.join(audio_dir, audio_nm + ".wav")
         text = first_line[1].strip()
 
-        audio_paths.append(audio_path)
-
+        # 逻辑调整: 先处理文本，检查通过后再加入列表
+        converted_text = ""
         if tokenizer == "pinyin":
-            texts.extend(convert_char_to_pinyin([text], polyphone=polyphone))
+            # 获取转换后的拼音字符串
+            converted_list = convert_char_to_pinyin([text], polyphone=polyphone)
+            converted_text = converted_list[0]
         elif tokenizer == "char":
-            texts.append(text)
+            converted_text = text
 
+        # 修改 2: 核心过滤逻辑
+        # 如果提供了 vocab_set，且转换后的文本包含不在词表中的字符，则跳过
+        if vocab_set is not None:
+            # 检查 converted_text 的字符集合是否是 vocab_set 的子集
+            if not set(converted_text).issubset(vocab_set):
+                # 包含禁用字，直接跳过该样本
+                continue
+
+        # 检查通过，数据对齐加入
+        audio_paths.append(audio_path)
+        texts.append(converted_text)
+
+        # 加载音频计算时长 (只有通过了检查才加载，节省IO)
         audio, sample_rate = torchaudio.load(audio_path)
         durations.append(audio.shape[-1] / sample_rate)
 
@@ -48,7 +65,17 @@ def deal_with_sub_path_files(dataset_path, sub_path):
 
 def main():
     assert tokenizer in ["pinyin", "char"]
-
+    # 修改 3: 加载 Emilia vocab (如果在配置里定义了路径)
+    vocab_set = None
+    if emilia_vocab_path and os.path.exists(emilia_vocab_path):
+        print(f"Loading Emilia vocab from: {emilia_vocab_path}")
+        with open(emilia_vocab_path, "r", encoding="utf-8") as f:
+            # 读取所有字符，去除换行符
+            vocab_set = set(line.strip() for line in f if line.strip())
+        vocab_set.add(" ") # 确保允许空格
+        assert len(vocab_set) == 2545, f'print{len(vocab_set)} error len'
+    else:
+        print("Warning: Emilia vocab path not found or invalid, skipping filter.")
     audio_path_list, text_list, duration_list = [], [], []
 
     executor = ProcessPoolExecutor(max_workers=max_workers)
@@ -57,7 +84,7 @@ def main():
         sub_items = os.listdir(dataset_path)
         sub_paths = [item for item in sub_items if os.path.isdir(os.path.join(dataset_path, item))]
         for sub_path in sub_paths:
-            futures.append(executor.submit(deal_with_sub_path_files, dataset_path, sub_path))
+            futures.append(executor.submit(deal_with_sub_path_files, dataset_path, sub_path, vocab_set))
     for future in tqdm(futures, total=len(futures)):
         audio_paths, texts, durations = future.result()
         audio_path_list.extend(audio_paths)
@@ -95,7 +122,7 @@ def main():
 
 if __name__ == "__main__":
     max_workers = 32
-
+    emilia_vocab_path = "/inspire/hdd/project/video-generation/chenxie-25019/hyr/F5-TTS/data/Emilia_ZH_EN_pinyin/vocab.txt"
     tokenizer = "pinyin"  # "pinyin" | "char"
     polyphone = True
     dataset_choice = 1  # 1: Premium, 2: Standard, 3: Basic
@@ -122,5 +149,5 @@ if __name__ == "__main__":
     #                           -            -        1459   (polyphone)
     # char   vocab size      5264         5219        5042
 
-    # vocab size may be slightly different due to rjieba tokenizer and pypinyin (e.g. way of polyphoneme)
+    # vocab size may be slightly different due to jieba tokenizer and pypinyin (e.g. way of polyphoneme)
     # please be careful if using pretrained model, make sure the vocab.txt is same
